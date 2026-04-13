@@ -1,8 +1,6 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { useSuspenseQuery } from '@tanstack/react-query'
-import { convexQuery } from '@convex-dev/react-query'
-import { api } from '../../convex/_generated/api'
-import { useMutation } from 'convex/react'
+import { useSuspenseQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { api } from '../../api'
 import { useState, useEffect } from 'react'
 
 export const Route = createFileRoute('/')({
@@ -10,16 +8,24 @@ export const Route = createFileRoute('/')({
 })
 
 function Home() {
-  const { data: restaurants } = useSuspenseQuery(convexQuery(api.restaurants.list, {}))
-  const createRestaurant = useMutation(api.restaurants.create)
+  const queryClient = useQueryClient()
+  const { data: restaurants = [], isLoading } = useSuspenseQuery({
+    queryKey: ['restaurants'],
+    queryFn: () => api.restaurants.list(),
+  })
+
+  const createMutation = useMutation({
+    mutationFn: (data: any) => api.restaurants.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['restaurants'] })
+    },
+  })
   
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [name, setName] = useState('')
   const [slug, setSlug] = useState('')
   const [country, setCountry] = useState('United States')
-  const [isSubmitting, setIsSubmitting] = useState(false)
   const [isDetecting, setIsDetecting] = useState(false)
-  const [error, setError] = useState('')
 
   const countries = [
     { name: 'United States', currency: 'USD', symbol: '$' },
@@ -62,11 +68,9 @@ function Home() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
-    setIsSubmitting(true)
-    setError('')
     try {
       const countryData = countries.find(c => c.name === country) || countries[0]
-      await createRestaurant({ 
+      await createMutation.mutateAsync({ 
         name, 
         slug: slug.toLowerCase().replace(/\s+/g, '-'),
         country: countryData.name,
@@ -76,11 +80,17 @@ function Home() {
       setIsModalOpen(false)
       setName('')
       setSlug('')
-    } catch (err: any) {
-      setError(err.message || 'Failed to create restaurant')
-    } finally {
-      setIsSubmitting(false)
+    } catch (err) {
+      console.error('Failed to create restaurant:', err)
     }
+  }
+
+  if (isLoading) {
+    return (
+      <main className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-slate-500">Loading...</div>
+      </main>
+    )
   }
 
   return (
@@ -97,9 +107,9 @@ function Home() {
         </div>
 
         <div className="grid md:grid-cols-2 gap-6">
-          {restaurants.map((restaurant) => (
+          {restaurants.map((restaurant: any) => (
             <Link
-              key={restaurant._id}
+              key={restaurant.id}
               to="/pos/$slug"
               params={{ slug: restaurant.slug }}
               className="group block p-8 bg-white rounded-2xl shadow-sm border border-slate-200 hover:border-orange-500 hover:shadow-md transition-all"
@@ -200,13 +210,12 @@ function Home() {
                   />
                 </div>
               </div>
-              {error && <p className="text-red-500 text-sm bg-red-50 p-3 rounded-lg border border-red-100">{error}</p>}
               <div className="pt-2">
                 <button 
-                  disabled={isSubmitting}
+                  disabled={createMutation.isPending}
                   className="w-full bg-orange-600 text-white py-3 rounded-xl font-bold hover:bg-orange-700 disabled:opacity-50 transition-all shadow-lg shadow-orange-100"
                 >
-                  {isSubmitting ? 'Creating...' : 'Register Restaurant'}
+                  {createMutation.isPending ? 'Creating...' : 'Register Restaurant'}
                 </button>
               </div>
             </form>
